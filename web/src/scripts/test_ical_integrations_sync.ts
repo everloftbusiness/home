@@ -1,15 +1,14 @@
 import { createClient } from "@supabase/supabase-js";
 import * as dotenv from "dotenv";
 import * as path from "path";
-import {
-  getICalChannelFeeds,
-  saveICalChannelFeeds,
-  getPropertyCalendarBlocks,
-} from "../features/properties/services/ical-sync.service";
-import {
-  saveManualCalendarBlockAction,
-  deleteCalendarBlockAction,
-} from "../features/properties/actions/calendar-sync.actions";
+
+// Mock 'server-only' package for Node.js tsx execution environment
+require("module")._cache[require.resolve("server-only")] = {
+  id: require.resolve("server-only"),
+  filename: require.resolve("server-only"),
+  loaded: true,
+  exports: {},
+};
 
 dotenv.config({ path: path.join(process.cwd(), ".env") });
 
@@ -17,6 +16,13 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://cvgrwujjaak
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2Z3J3dWpqYWFrcXJ4YXNpeHlmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NTQxODk0NiwiZXhwIjoyMTAwOTk0OTQ2fQ.2eb1XRoBVX0kSqXjquuOdIH-6gmpTi3Dh5l9zaqCAIA";
 
 async function main() {
+  const {
+    getICalChannelFeeds,
+    saveICalChannelFeeds,
+    getPropertyCalendarBlocks,
+    savePropertyCalendarBlocks,
+  } = await import("../features/properties/services/ical-sync.service");
+
   console.log("==================================================");
   console.log("INTEGRATION TEST: property_integrations & 15-Min Smart Cache");
   console.log("==================================================");
@@ -67,7 +73,6 @@ async function main() {
     notes: "Unit Test Vacation",
   }];
 
-  const { savePropertyCalendarBlocks } = await import("../features/properties/services/ical-sync.service");
   await savePropertyCalendarBlocks(testPropertyId, newBlocks);
 
   const verifyBlocks = await getPropertyCalendarBlocks(testPropertyId);

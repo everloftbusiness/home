@@ -2,9 +2,12 @@
 // (public "Anyone with the link: Viewer") via the gviz/tq JSON endpoint. Server-side only
 // (avoids the CORS/sign-in issues the original client-side fetch had to work around).
 
-const SPREADSHEET_ID = process.env.NEXT_PUBLIC_EVERLOFT_SPREADSHEET_ID ?? "";
+const PINNACLE_SPREADSHEET_ID = "1Q_fEZLHCENn-her2QOSkniZqkP-f6DBe";
+const SPREADSHEET_ID = process.env.NEXT_PUBLIC_EVERLOFT_SPREADSHEET_ID || PINNACLE_SPREADSHEET_ID;
 
 export const SHEET_NAMES = [
+  "Pinnacle Income",
+  "Pinnacle Expenses",
   "Bookings",
   "Assets",
   "Revenue",
@@ -16,12 +19,12 @@ export const SHEET_NAMES = [
   "New_Assets",
 ] as const;
 
-export type SheetName = (typeof SHEET_NAMES)[number];
+export type SheetName = (typeof SHEET_NAMES)[number] | string;
 export type SheetRow = Record<string, string | number | boolean | null>;
 
-function buildUrl(sheetName: string) {
+function buildUrl(sheetName: string, sheetId = SPREADSHEET_ID) {
   return (
-    `https://docs.google.com/spreadsheets/d/${encodeURIComponent(SPREADSHEET_ID)}` +
+    `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetId)}` +
     `/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`
   );
 }
@@ -49,13 +52,14 @@ function parseSheetData(payloadText: string): SheetRow[] {
   return parsed.table.rows.map((row) => buildRow(parsed.table!.cols, row));
 }
 
-export async function fetchSheetData(sheetName: SheetName): Promise<SheetRow[]> {
-  if (!SPREADSHEET_ID) {
-    throw new Error("Spreadsheet ID is missing. Set NEXT_PUBLIC_EVERLOFT_SPREADSHEET_ID.");
+export async function fetchSheetData(sheetName: SheetName, targetSheetId?: string): Promise<SheetRow[]> {
+  const targetId = targetSheetId || SPREADSHEET_ID;
+  if (!targetId) {
+    throw new Error("Spreadsheet ID is missing.");
   }
   let response: Response;
   try {
-    response = await fetch(buildUrl(sheetName), { cache: "no-store" });
+    response = await fetch(buildUrl(sheetName, targetId), { cache: "no-store" });
   } catch {
     throw new Error("Network error while contacting Google Sheets.");
   }

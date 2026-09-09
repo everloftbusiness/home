@@ -1,0 +1,65 @@
+// Isolated Postgres-compatible execution. Never connects to the real Supabase project.
+import { PGlite } from '@electric-sql/pglite';
+import { readFile } from 'node:fs/promises';
+import assert from 'node:assert/strict';
+const db=new PGlite();
+try {
+ await db.exec(`create role anon; create role authenticated; create schema auth;
+ create table auth.users(id uuid primary key);
+ create function auth.uid() returns uuid language sql as $$select nullif(current_setting('request.user',true),'')::uuid$$;
+ create table public.profiles(id uuid primary key);
+ create table public.roles(id uuid primary key default gen_random_uuid(),slug text unique);
+ create table public.permissions(id uuid primary key default gen_random_uuid(),key text unique,name text,description text,category text);
+ create table public.role_permissions(role_id uuid,permission_id uuid,deleted_at timestamptz,unique(role_id,permission_id));
+ create table public.properties(id uuid primary key,name text,deleted_at timestamptz);
+ alter table public.properties enable row level security;
+ grant usage on schema auth,public to authenticated;
+ grant select on public.properties to authenticated;
+ create function public.authorize(k text) returns boolean language sql stable as $$ select current_setting('request.allowed',true)='yes' $$;
+ create table audit_probe(table_name text,action text);
+ create function public.record_audit_log() returns trigger language plpgsql security definer as $$begin insert into audit_probe values(tg_table_name,tg_op);return coalesce(new,old);end$$;
+ create function public.set_updated_at() returns trigger language plpgsql as $$begin new.updated_at=now();return new;end$$;
+ create function public.set_audit_columns() returns trigger language plpgsql as $$begin new.updated_by=auth.uid();if tg_op='INSERT' then new.created_by=auth.uid();end if;return new;end$$;
+ insert into roles(slug) values('super_admin'),('finance_admin'),('investor');
+ insert into properties values('22222222-2222-4222-8222-222222222222','Test property',null);
+ set request.allowed='yes';`);
+ await db.exec(await readFile(new URL('../supabase/migrations/20260906000002_booking_settlements.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20260906000003_booking_collection_mode.sql',import.meta.url),'utf8'));
+ await db.exec('set role authenticated');
+ const payload={request_id:'11111111-1111-4111-8111-111111111111',property_id:'22222222-2222-4222-8222-222222222222',guest_name:'Test guest',email:'',phone:'',country:'',unit_label:'405',source:'Airbnb',external_booking_ref:'OTA-1',booking_date:'2026-06-01',check_in_date:'2026-06-02',check_out_date:'2026-06-03',adults:1,children:0,currency:'INR',status:'confirmed',notes:'',lines:[
+  {side:'guest',category:'accommodation',label:'Accommodation',amount:'2080'},{side:'guest',category:'tax',label:'Taxes',amount:'104'},{side:'guest',category:'guest_service_fee',label:'Guest fee',amount:'293.65'},
+  {side:'host',category:'accommodation',label:'Host base',amount:'2600'},{side:'host',category:'rate_adjustment',label:'Adjustment',amount:'-520'},{side:'host',category:'host_service_fee',label:'Host fee',amount:'-62.4'},{side:'host',category:'withholding',label:'Tax',amount:'-2.08'}]};
+ const save=async p=>(await db.query('select save_booking_record($1::jsonb) id',[JSON.stringify(p)])).rows[0].id;
+ const id=await save(payload);assert.equal(await save(payload),id,'Creation must be idempotent');
+ let row=(await db.query('select * from booking_register')).rows[0];assert.equal(Number(row.guest_total),2477.65);assert.equal(Number(row.host_total),2015.52);assert.equal(row.nights,1);
+ await assert.rejects(()=>save({...payload,id,updated_at:'2020-01-01T00:00:00Z'}),/changed/);
+ await assert.rejects(()=>save({...payload,request_id:crypto.randomUUID(),external_booking_ref:'OTA-2',lines:undefined}),/breakdowns/);
+ await assert.rejects(()=>save({...payload,request_id:crypto.randomUUID(),external_booking_ref:'OTA-2',currency:'JPY'}),/precision/);
+ const pay={request_id:crypto.randomUUID(),booking_id:id,payment_type:'host_payout',direction:'inbound',amount:'2015.52',account_label:'Test bank',payment_method:'bank_transfer',reference:'REF-1',settled_at:'2026-06-03'};
+ const record=async p=>(await db.query('select record_booking_payment($1::jsonb) id',[JSON.stringify(p)])).rows[0].id;
+ await assert.rejects(()=>record(pay),/Finalize/);
+ await db.query('select finalize_booking_record($1)',[id]);
+ await assert.rejects(()=>save({...payload,id}),/locked/);
+ const tid=await record(pay);assert.equal(await record(pay),tid);
+ row=(await db.query('select * from booking_register')).rows[0];assert.equal(Number(row.payout_balance),0);
+ await record({...pay,request_id:crypto.randomUUID(),payment_type:'deposit',amount:'1000'});
+ row=(await db.query('select * from booking_register')).rows[0];assert.equal(Number(row.deposit_held),1000);assert.equal(Number(row.payout_balance),0);
+ await db.query('select reverse_booking_payment($1,$2)',[tid,'Incorrect bank reference']);
+ row=(await db.query('select * from booking_register')).rows[0];assert.equal(Number(row.payout_balance),2015.52);
+ await assert.rejects(()=>db.query('select reverse_booking_payment($1,$2)',[tid,'Duplicate correction']),/already reversed/);
+ await assert.rejects(()=>db.query('update bookings set notes=$1 where id=$2',['tampered',id]),/permission denied/);
+ const directId=await save({...payload,request_id:crypto.randomUUID(),source:'Direct',external_booking_ref:'DIRECT-1',collection_mode:'direct'});
+ await db.query('select finalize_booking_record($1)',[directId]);
+ await record({...pay,request_id:crypto.randomUUID(),booking_id:directId,payment_type:'guest_collection',amount:'2477.65'});
+ const direct=(await db.query('select * from booking_register where id=$1',[directId])).rows[0];
+ assert.equal(Number(direct.guest_balance),0);assert.equal(Number(direct.payout_balance),0);
+ await db.query('select update_booking_stay_status($1,$2)',[directId,'checked_in']);
+ assert.equal((await db.query('select status from bookings where id=$1',[directId])).rows[0].status,'checked_in');
+ await assert.rejects(()=>db.query('select save_booking_record_v1($1::jsonb)',[JSON.stringify(payload)]),/permission denied/);
+ await db.exec("set request.allowed='no'");
+ assert.equal((await db.query('select * from booking_register')).rows.length,0);
+ await assert.rejects(()=>save({...payload,request_id:crypto.randomUUID()}),/Permission denied/);
+ await db.exec('reset role');
+ assert.ok(Number((await db.query('select count(*) n from audit_probe')).rows[0].n)>0);
+ console.log('PASS: migration, exact sheet totals, rollback, idempotency, draft locks, payments, deposit separation, reversals, RLS, write restrictions, audit triggers.');
+} finally {await db.close();}

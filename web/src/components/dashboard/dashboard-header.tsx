@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Home, Key, LineChart, LayoutGrid, Building2, LogOut, Menu } from "lucide-react";
+import { Home, Key, LineChart, LayoutGrid, Building2, LogOut, Menu, CalendarDays, Plus } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ export function DashboardHeader({ session }: { session: DashboardSession }) {
 
   const canViewProperties =
     session.permissions.includes("view_properties") || session.permissions.includes("manage_properties");
+  const canViewBookingRegister = session.permissions.includes("manage_booking_register");
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -62,6 +63,7 @@ export function DashboardHeader({ session }: { session: DashboardSession }) {
                         <Building2 className="h-4 w-4 text-emerald-800 dark:text-emerald-400" /> Properties
                       </Link>
                     )}
+                    {canViewBookingRegister && <Link href="/dashboard/bookings" onClick={() => setMobileOpen(false)} className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold hover:bg-muted">Bookings & Settlements</Link>}
                     <Link
                       href={`/dashboard/${session.roleSlug}`}
                       onClick={() => setMobileOpen(false)}
@@ -155,6 +157,25 @@ export function DashboardHeader({ session }: { session: DashboardSession }) {
           </button>
         </div>
       </div>
+      {canViewBookingRegister && (
+        <div className="border-t border-border bg-muted/30">
+          <nav aria-label="Booking shortcuts" className="site-container flex flex-wrap items-center gap-3 py-3">
+            <Button asChild variant="blue-accent" className="rounded-md">
+              <Link href="/dashboard/bookings">
+                <CalendarDays className="h-4 w-4" />
+                Bookings & Settlements
+              </Link>
+            </Button>
+            <Button asChild variant="outline" className="rounded-md">
+              <Link href="/dashboard/bookings/new">
+                <Plus className="h-4 w-4" />
+                Add booking
+              </Link>
+            </Button>
+            <span className="hidden text-xs text-muted-foreground lg:block">Guest details, charges and payment tracking</span>
+          </nav>
+        </div>
+      )}
     </header>
   );
 }

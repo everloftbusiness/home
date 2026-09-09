@@ -43,6 +43,7 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
         </div>
       )}
 
+      {session.permissions.includes("manage_booking_register") && <div className="mb-6"><Link className="text-sm font-medium text-blue-600 hover:underline" href={`/dashboard/bookings?property=${property.id}`}>View bookings & settlements for this property →</Link></div>}
       <DashboardSection title="Calendar & Airbnb Sync">
         <PropertyCalendarManager
           propertyId={property.id}
